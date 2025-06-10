@@ -1,12 +1,13 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
+#include <ArduinoJson.h>
 
 // Wi-Fi
-const char *ssid = "Eduardo";
-const char *password = "12345678";
+const char *ssid = "sua-rede-wifi";
+const char *password = "senha";
 
 // Broker MQTT
-const char *mqtt_server = "192.168.109.172";
+const char *mqtt_server = "";
 const int mqtt_port = 1883;
 
 // Tópicos MQTT
@@ -49,32 +50,47 @@ void setup_wifi() {
   Serial.println(WiFi.localIP());
 }
 
-// Callback para mensagens MQTT
 void callback(char *topic, byte *payload, unsigned int length) {
+  // Converte payload em String
   String msg;
   for (unsigned int i = 0; i < length; i++) {
     msg += (char)payload[i];
   }
-  msg.toUpperCase();
+
+  // Cria o objeto JSON
+  StaticJsonDocument<128> doc;
+  DeserializationError error = deserializeJson(doc, msg);
+
+  if (error) {
+    Serial.printf("Erro ao interpretar JSON em %s: %s\n", topic, error.c_str());
+    return;
+  }
+
+  // Obtém o comando do JSON
+  String cmd = doc["estado"];
+  cmd.toUpperCase();  // Garante consistência
 
   for (uint8_t i = 0; i < NUM_LEDS; i++) {
     if (String(topic) == sub_topics[i]) {
-      if (msg == "ON") {
+      if (cmd == "ON") {
         digitalWrite(LED_PINS[i], HIGH);
         Serial.printf("Recebido 'ON' para %s → LED %d ligado\n", topic, i);
-      } else if (msg == "OFF") {
+      } else if (cmd == "OFF") {
         digitalWrite(LED_PINS[i], LOW);
         Serial.printf("Recebido 'OFF' para %s → LED %d desligado\n", topic, i);
       } else {
-        Serial.printf("Comando desconhecido em %s: %s\n", topic, msg.c_str());
+        Serial.printf("Comando desconhecido em %s: %s\n", topic, cmd.c_str());
       }
 
-      // Publica status no tópico correto
-      client.publish(pub_topics[i], msg.c_str(), true);
+      // Reenvia o mesmo JSON para o tópico de status
+      String output;
+      serializeJson(doc, output);
+      client.publish(pub_topics[i], output.c_str(), true);
       break;
     }
   }
 }
+
 
 // Conexão com o broker MQTT
 void reconnect() {
